@@ -4,7 +4,8 @@
  *   rotateCCW(90.0f);      // CCW 90 degrees; use -90.0f for clockwise.
  *   stopDriving();         // Brake both wheels.
  *
- * Moves wait until finished or stopped by a fault: true = success, false = fault.
+ * Moves wait until finished, interrupted by the monitor, or stopped by a fault.
+ * true = completed; false = interrupted/fault (check wasMotionInterrupted()).
  * Encoders measure travel; the PID in motor_control.h controls wheel speed.
  * Long moves: ramp up, cruise, ramp down. Short moves: steady minimum speed.
  * Names: l/r = left/right; ticks = encoder counts.
@@ -26,7 +27,28 @@ const float SLEW_ACCEL_CM_S2 = 10.0f;      // Ramp acceleration (cm/s^2); lower 
 const unsigned long MOVEMENT_TIMEOUT_MS = 60000UL;   // 60 s maximum per move.
 const unsigned long NO_PROGRESS_TIMEOUT_MS = 3000UL; // 3 s without progress = stall.
 const unsigned long BRAKE_SETTLE_MS = 200UL;         // Let braking settle after success.
-const bool REPORT_DRIVING_PID = true;              // Print PID data to Serial when true.
+const bool REPORT_DRIVING_PID = false;             // Keep Serial from delaying camera checks.
+
+MotionMonitor motion_monitor = 0;
+bool movement_interrupted = false;
+
+void setMotionMonitor(MotionMonitor monitor) {
+  motion_monitor = monitor;
+}
+
+bool wasMotionInterrupted() {
+  return movement_interrupted;
+}
+
+bool drivingSettingsValid() {
+  return isfinite(WHEEL_DIAMETER_CM) && WHEEL_DIAMETER_CM > 0.0f &&
+      isfinite(TRACK_WIDTH_CM) && TRACK_WIDTH_CM > 0.0f &&
+      isfinite(ENCODER_TICKS_PER_WHEEL_REV) && ENCODER_TICKS_PER_WHEEL_REV > 0.0f &&
+      isfinite(MIN_MOTION_SPEED_CM_S) && MIN_MOTION_SPEED_CM_S > 0.0f &&
+      isfinite(SLEW_ACCEL_CM_S2) && SLEW_ACCEL_CM_S2 > 0.0f &&
+      isfinite(DRIVE_SPEED_CM_S) && DRIVE_SPEED_CM_S >= MIN_MOTION_SPEED_CM_S &&
+      isfinite(TURN_SPEED_CM_S) && TURN_SPEED_CM_S >= MIN_MOTION_SPEED_CM_S;
+}
 
 // --- Stop ---
 // Zero speed brakes immediately and clears stored PID error.
@@ -63,10 +85,11 @@ float rampSpeed(float progress_cm, float target_cm, float max_speed_cm_s) {
  * Each wheel brakes at its target; a zero distance keeps that wheel braked.
  */
 bool moveWheels(float distance_l_cm, float distance_r_cm, float max_speed_cm_s) {
+  movement_interrupted = false;
   // 1. Check calibration and speed limits.
-  if (WHEEL_DIAMETER_CM <= 0.0f || TRACK_WIDTH_CM <= 0.0f ||
-      ENCODER_TICKS_PER_WHEEL_REV <= 0.0f || MIN_MOTION_SPEED_CM_S <= 0.0f ||
-      max_speed_cm_s < MIN_MOTION_SPEED_CM_S || SLEW_ACCEL_CM_S2 <= 0.0f) {
+  if (!drivingSettingsValid() || !isfinite(distance_l_cm) ||
+      !isfinite(distance_r_cm) || !isfinite(max_speed_cm_s) ||
+      max_speed_cm_s < MIN_MOTION_SPEED_CM_S) {
     stopDriving();
     Serial.println(F("Check calibration and speed limits in driving.ino."));
     return false;
@@ -77,6 +100,11 @@ bool moveWheels(float distance_l_cm, float distance_r_cm, float max_speed_cm_s) 
       ENCODER_TICKS_PER_WHEEL_REV / (PI * WHEEL_DIAMETER_CM);
   const float target_l = abs(distance_l_cm) * ticks_per_cm;
   const float target_r = abs(distance_r_cm) * ticks_per_cm;
+  if (!isfinite(target_l) || !isfinite(target_r) ||
+      target_l >= 2147483647.0f || target_r >= 2147483647.0f) {
+    stopDriving();
+    return false;
+  }
 
   // Targets are positive tick counts; direction holds the forward/backward sign.
   const int direction_l = (distance_l_cm < 0.0f) ? -1 : 1;
@@ -98,6 +126,11 @@ bool moveWheels(float distance_l_cm, float distance_r_cm, float max_speed_cm_s) 
 
   // 4. Read progress, check for faults, and update speeds until both wheels finish.
   while (!finished_l || !finished_r) {
+    if (motion_monitor && !motion_monitor()) {
+      movement_interrupted = true;
+      success = false;
+      break;
+    }
     const unsigned long now_ms = millis();
 
     // Direction makes intended travel positive. Wrong-way travel reduces progress.
@@ -159,7 +192,7 @@ bool moveWheels(float distance_l_cm, float distance_r_cm, float max_speed_cm_s) 
 
   // 5. Brake both wheels after completion or a fault.
   stopDriving();
-  if (success) {
+  if (success || movement_interrupted) {
     delay(BRAKE_SETTLE_MS);
   } else {
     Serial.println(F("Movement stopped: timeout or no encoder progress."));
@@ -173,6 +206,15 @@ bool driveDistance(float distance_cm) {
   return moveWheels(distance_cm, distance_cm, DRIVE_SPEED_CM_S);
 }
 
+bool driveDistance(float distance_cm, float speed_cm_s) {
+  if (!isfinite(speed_cm_s)) {
+    movement_interrupted = false;
+    stopDriving();
+    return false;
+  }
+  return moveWheels(distance_cm, distance_cm, min(speed_cm_s, DRIVE_SPEED_CM_S));
+}
+
 // --- Turn in place ---
 /*
  * Viewed from above: positive angle = CCW, negative = clockwise.
@@ -183,4 +225,63 @@ bool rotateCCW(float angle_degrees) {
 
   // Opposite wheel directions make the robot spin around its center.
   return moveWheels(-wheel_arc_cm, wheel_arc_cm, TURN_SPEED_CM_S);
+}
+
+// Search without stopping at angle increments. The monitor ends the search.
+// Positive rate = CCW. Slew up in time; brake immediately on interruption/fault.
+bool rotateContinuously(float turn_rate_deg_s) {
+  movement_interrupted = false;
+  const float requested_speed = abs(turn_rate_deg_s) * PI * TRACK_WIDTH_CM / 360.0f;
+  if (!drivingSettingsValid() || !isfinite(turn_rate_deg_s) || !isfinite(requested_speed) ||
+      !isfinite(TURN_SPEED_CM_S) || TURN_SPEED_CM_S < MIN_MOTION_SPEED_CM_S ||
+      requested_speed < MIN_MOTION_SPEED_CM_S) {
+    stopDriving();
+    Serial.println(F("Invalid search speed or driving calibration."));
+    return false;
+  }
+  const float max_speed = min(requested_speed, TURN_SPEED_CM_S);
+  const float ticks_per_cm = ENCODER_TICKS_PER_WHEEL_REV / (PI * WHEEL_DIAMETER_CM);
+  const int direction = (turn_rate_deg_s > 0.0f) ? 1 : -1;
+  const long start_l = enc_l.read();
+  const long start_r = enc_r.read();
+  long furthest_l = 0;
+  long furthest_r = 0;
+  unsigned long last_progress_l_ms = millis();
+  unsigned long last_progress_r_ms = last_progress_l_ms;
+  unsigned long update_ms = last_progress_l_ms;
+  float speed_cm_s = 0.0f;
+  resetPID();
+
+  while (true) {
+    if (motion_monitor && !motion_monitor()) {
+      movement_interrupted = true;
+      stopDriving();
+      delay(BRAKE_SETTLE_MS);
+      return false;
+    }
+    const unsigned long now_ms = millis();
+    const long progress_l = -direction * (enc_l.read() - start_l);
+    const long progress_r = direction * (enc_r.read() - start_r);
+    if (progress_l > furthest_l) {
+      furthest_l = progress_l;
+      last_progress_l_ms = now_ms;
+    }
+    if (progress_r > furthest_r) {
+      furthest_r = progress_r;
+      last_progress_r_ms = now_ms;
+    }
+    if (now_ms - last_progress_l_ms >= NO_PROGRESS_TIMEOUT_MS ||
+        now_ms - last_progress_r_ms >= NO_PROGRESS_TIMEOUT_MS) {
+      stopDriving();
+      Serial.println(F("Search stopped: no encoder progress."));
+      return false;
+    }
+    const unsigned long dt_ms = min(now_ms - update_ms, 50UL);
+    update_ms = now_ms;
+    speed_cm_s = min(max_speed, speed_cm_s + SLEW_ACCEL_CM_S2 * dt_ms / 1000.0f);
+    const long ticks_s = (speed_cm_s > 0.0f)
+        ? max(1L, (long)(speed_cm_s * ticks_per_cm)) : 0;
+    updatePID(-direction * ticks_s, direction * ticks_s, REPORT_DRIVING_PID);
+    delay(1);
+  }
 }
