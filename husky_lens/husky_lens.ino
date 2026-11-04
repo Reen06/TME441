@@ -6,6 +6,7 @@
 #include "motor_control.h"
 #include <HUSKYLENS.h>
 
+
 HUSKYLENS cam;
 
 int main() {
