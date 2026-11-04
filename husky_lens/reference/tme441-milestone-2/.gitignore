@@ -1,0 +1,22 @@
+# Arduino build output
+build/
+*.o
+*.d
+*.elf
+*.hex
+*.eep
+*.bin
+*.map
+*.lss
+*.sym
+
+# VS Code workspace configuration
+.vscode/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Ignore my personal driving and motor control files
+motor_control.h
+driving.ino
