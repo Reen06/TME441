@@ -2,7 +2,7 @@
 
 | Stage | Status | Start here |
 | --- | --- | --- |
-| Milestone 2 | Active camera-only tag-tracking implementation | [Guide](<Milestone 2/README.md>) |
+| Milestone 2 | Active camera + HC-SR04 tag tracking | [Guide](<Milestone 2/README.md>) |
 | Milestone 2 - Dead reckoning | Planned, later | [Plan](<Milestone 2 - Dead reckoning/README.md>) |
 | Milestone 2 - Range and Heading | Planned additional experiments, later | [Plan](<Milestone 2 - Range and Heading/README.md>) |
 | Milestone 3 | Planned, later | [Plan](<Milestone 3/README.md>) |

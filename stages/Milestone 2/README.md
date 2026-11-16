@@ -1,31 +1,35 @@
 # Milestone 2: Tag Tracking
 
-Active camera-only implementation of the assignment route: **1 -> 2 -> 3 -> HALT**.
+Active implementation: **camera identifies/aligns tags, HC-SR04 measures the final
+clearance, route 1 -> 2 -> 3 -> HALT**.
 
 Open [tme441-milestone-2.ino](tme441-milestone-2/tme441-milestone-2.ino) in Arduino IDE.
-Select **Arduino Mega 2560**. All the other files in that sketch folder are tabs
-of the same program. Serial Monitor is **115200 baud**; the camera UART is **9600**.
-The former `husky_lens/` sketch and its tests now live in this stage.
+Select **Arduino Mega 2560**. Serial Monitor is **115200 baud** and the camera UART
+is **9600**. Calibration mode currently remains enabled for tag 2, with motors braked.
 
 | Folder | Contents |
 | --- | --- |
-| `tme441-milestone-2/` | Active sketch, `driving.ino`, `camera.ino`, `navigation.ino`, and settings. |
-| [docs/](docs/README.md) | Wiring, behavior, status messages, and settings. |
-| [docs/CALIBRATION_AND_ARENA_TESTS.md](docs/CALIBRATION_AND_ARENA_TESTS.md) | Required camera measurements and physical acceptance tests. |
-| [tests/](tests/README.md) | Simulated checks of the actual code, including the complete three-tag route. |
-| `reference/` | Original supplied camera library and Milestone 2 package, preserved unchanged. |
+| `tme441-milestone-2/` | Active sketch, driving, camera, ultrasonic, navigation, and settings. |
+| [docs/](docs/README.md) | Wiring, camera/ultrasonic handoff, statuses, and settings. |
+| [Calibration and arena tests](docs/CALIBRATION_AND_ARENA_TESTS.md) | Raw measurements, fitted camera model, observed visibility limit, and physical checks. |
+| [tests/](tests/README.md) | Actual camera, HC-SR04, driving, and full-route code exercised with simulated I/O. |
+| `reference/` | Original supplied packages, preserved unchanged. |
 
-The camera fit and mounting offset still need measurements on the actual robot.
-Compilation and simulated checks cannot establish physical stopping accuracy.
+## Current behavior
 
-## Software behavior
+- Check the camera and learned IDs at startup, then visit IDs 1, 2, 3 once.
+- `rangeAndHeadingToTag(int)` estimates range and heading together before alignment.
+- Search and align by camera; approach to about **35 cm** while the tag is visible.
+- Require three fresh, agreeing HC-SR04 pings whose range agrees with the locked,
+  aligned camera target. The reported camera visibility cutoff is about **27 cm**.
+- Approach straight in encoder-bounded steps of at most **1 cm**, with live
+  ultrasonic monitoring. Losing the close-range tag image does not start a pivot.
+- Aim for 8 cm. Confirm arrival while braked using three agreeing pings with median
+  at most **9 cm**, and all three readings at most **10 cm**, from the sensor face.
+- Invalid/timeout echo during close movement brakes and returns `-2`. A travel
+  budget and deadline prevent an unchanging far reading from driving indefinitely.
+- A failed tag is never skipped. After tag 3, hold the brakes until reset.
 
-- Powers on autonomously and checks camera communication and learned tag count.
-- `rangeAndHeadingToTag(int)` returns a struct with range in cm and heading in degrees from one response.
-- `driveToTag(int)` returns `1` on arrival, `-1` on unsuccessful search, and `-2` on other faults.
-- Visits each target exactly once, never skips a failed tag, and holds the brakes after tag 3.
-- Searches by pivoting in place; normal approach steps retain camera monitoring.
-- Plans only the last 5 cm or less from a fresh, centered camera pose if the tag leaves view near the robot.
-
-Future dead-reckoning, range/heading experiments, and Milestone 3 each have their
-own placeholder folder beside this one. They are not additional upload choices yet.
+The earlier camera-only encoder finish has been replaced. Initial camera fits and
+a separate -1.5 cm correction are recorded; physical sonar and stopping checks
+remain necessary. Future stages have separate folders beside this one.

@@ -9,6 +9,7 @@
 #include "camera.h"
 #include "driving.h"
 #include "navigation.h"
+#include "ultrasonic.h"
 
 HUSKYLENS cam;
 int mission_status = 0;
@@ -18,6 +19,7 @@ void setup() {
   Serial3.begin(9600);  // Camera TX -> Mega RX3 D15; camera RX -> TX3 D14.
   initMotors();
   stopDriving();
+  initUltrasonic();
   if (!navigationSettingsValid()) {
     Serial.println(F("[fault] invalid navigation/driving settings"));
     mission_status = TAG_NAVIGATION_ERROR;
@@ -53,8 +55,8 @@ void setup() {
     return;
   }
   if (CAMERA_CALIBRATION_MODE) {
-    Serial.println(F("[calibration] motors braked; place tag at measured distances/angles"));
-    Serial.println(F("time_ms,tag_id,status,x_px,height_px,range_cm,heading_deg"));
+    Serial.println(F("[calibration] camera + HC-SR04; motors braked; place tag board at measured distances"));
+    Serial.println(F("time_ms,tag_id,status,x_px,height_px,range_cm,heading_deg,ultrasonic_status,ultrasonic_cm"));
     return;
   }
   Serial.println(F("[route] autonomous startup: 1 -> 2 -> 3, then HALT"));

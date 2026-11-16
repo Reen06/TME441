@@ -30,7 +30,8 @@ TagPose rangeAndHeadingToTag(int tag_id) {
 
     pose.x_px = result.xCenter;
     pose.height_px = result.height;
-    pose.range_cm = RANGE_HEIGHT_SCALE_CM_PX / result.height + RANGE_OFFSET_CM;
+    pose.range_cm = RANGE_HEIGHT_SCALE_CM_PX / result.height + RANGE_OFFSET_CM +
+                    RANGE_BIAS_CORRECTION_CM;
     pose.heading_deg = atan2(CAMERA_CENTER_X_PX - result.xCenter,
                             CAMERA_FOCAL_LENGTH_PX) * 180.0f / PI;
     if (!isfinite(pose.range_cm) || pose.range_cm <= 0.0f ||
